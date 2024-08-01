@@ -309,7 +309,7 @@ def plot_shap_summary(shap_values, feature_names):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def main(args):
+def main(company_name, pdf_path, csv_path):
     try:
         print(f"Running main with args: {args}")
         
