@@ -311,10 +311,10 @@ logger = logging.getLogger(__name__)
 
 def main(company_name, pdf_path, csv_path):
     try:
-        print(f"Running main with args: {args}")
-        
+        print(f"Running analysis for {company_name}...")
+
         # Extract and merge data
-        data = extract_and_merge(args.pdf_path, args.csv_path)
+        data = extract_and_merge(pdf_path, csv_path)    
         
         # Assign sentiment scores
         data = assign_scores(data)
@@ -334,6 +334,22 @@ def main(company_name, pdf_path, csv_path):
         # Train and evaluate
         train_and_evaluate(MODEL_NAME, train_dataset, test_dataset, class_weights)
     
+        if model:
+            # Compute SHAP values
+            shap_values, subset = compute_shap_values(model, test_dataset)
+
+            # Plot SHAP summary
+            plot_shap_summary(shap_values, tokenizer.get_vocab().keys())
+
+            # Save SHAP summary plot
+            shap_path = os.path.join(f'{company_name}_shap_summary.png')
+            plt.figure(figsize=(10, 6))
+            shap.summary_plot(shap_values, plot_type="bar", show=False)
+            plt.tight_layout()
+            plt.savefig(shap_path)
+            plt.close()
+
+            print(f"SHAP summary plot saved for {company_name} at {shap_path}")
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
         logger.error(traceback.format_exc())
