@@ -1,0 +1,13 @@
+PyPDF2
+emoji
+nltk
+transformers
+datasets
+accelerate
+shap
+torch
+scikit-learn
+pandas
+numpy
+matplotlib
+seaborn
