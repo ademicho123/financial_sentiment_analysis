@@ -339,10 +339,21 @@ def main(args):
         logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Sentiment Analysis')
-    parser.add_argument('--pdf_path', type=str, default='pdf_files/', help='Path to the directory containing PDF files')
-    parser.add_argument('--csv_path', type=str, default='news_data.csv', help='Path to the CSV file containing news data')
-    
-    args = parser.parse_args()
-    
-    main(args)
+    # Define paths for each company
+    companies = {
+        'Lloyds': {
+            'pdf_path': 'data/lloyds',
+            'csv_path': 'data/lloyds/lloyds_news.csv'
+        },
+        'IAG': {
+            'pdf_path': 'data/iag',
+            'csv_path': 'data/iag/iag_news.csv'
+        },
+        'Vodafone': {
+            'pdf_path': 'data/vodafone',
+            'csv_path': 'data/vodafone/vodafone_news.csv'
+        }
+    }
+
+    for company_name, paths in companies.items():
+        main(company_name, paths['pdf_path'], paths['csv_path'])
