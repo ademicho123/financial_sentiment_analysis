@@ -11,3 +11,8 @@ pandas
 numpy
 matplotlib
 seaborn
+streamlit
+plotly
+yfinance
+beautifulsoup4
+nlpaug

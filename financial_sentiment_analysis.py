@@ -25,7 +25,6 @@ import PyPDF2
 import re
 import nltk
 import emoji
-import shap
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import WordNetLemmatizer
@@ -51,7 +50,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Define the model name
-MODEL_NAME = 'soleimanian/financial-roberta-large-sentiment'
+MODEL_NAME = 'distilbert-base-uncased'
 
 # Function to extract sentences from PDFs using PyPDF2
 def read_pdf_sentences(file_path):
@@ -180,7 +179,7 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 # Prepare Dataset Function
-def prepare_dataset(data, tokenizer, sample_frac=0.10, random_state=42, chunk_size=100):
+def prepare_dataset(data, tokenizer, sample_frac=0.05, random_state=42, chunk_size=100):
     print("Preparing dataset...")
     data = data.sample(frac=sample_frac, random_state=random_state).reset_index(drop=True)
     
@@ -240,8 +239,8 @@ def train_and_evaluate(model_name, train_dataset, test_dataset, class_weights):
                 'labels': torch.tensor([item['labels'] for item in batch])
             }
         
-        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
-        test_dataloader = DataLoader(test_dataset, batch_size=16, collate_fn=collate_fn)
+        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+        test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collate_fn)
         
         model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(
             model, optimizer, train_dataloader, test_dataloader
@@ -250,7 +249,7 @@ def train_and_evaluate(model_name, train_dataset, test_dataset, class_weights):
         print("Starting training...")
         model.train()
         accumulation_steps = 4  # Accumulate gradients over 4 batches
-        for epoch in range(3):  # 3 epochs
+        for epoch in range(1):  # 3 epochs
             for i, batch in enumerate(train_dataloader):
                 outputs = model(**batch)
                 loss = outputs.loss / accumulation_steps
@@ -288,71 +287,41 @@ def train_and_evaluate(model_name, train_dataset, test_dataset, class_weights):
         print(f"An error occurred: {str(e)}")
         return None, None, None
         
-def compute_shap_values(model, dataset, num_samples=100):
-    # Create a small subset of the dataset for SHAP analysis
-    subset = dataset.shuffle(seed=42).select(range(num_samples))
-    
-    # Create an explainer
-    explainer = shap.Explainer(model)
-    
-    # Compute SHAP values
-    shap_values = explainer(subset)
-    
-    return shap_values, subset
-
-def plot_shap_summary(shap_values, feature_names):
-    plt.figure(figsize=(10, 6))
-    shap.summary_plot(shap_values, feature_names=feature_names, plot_type="bar")
-    plt.tight_layout()
-    plt.show()
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 def main(company_name, pdf_path, csv_path):
     try:
-        print(f"Running analysis for {company_name}...")
+        logger.info(f"Processing {company_name}...")
+        
+        # Load and preprocess data
+        raw_data = extract_and_merge(pdf_path, csv_path)
+        data_with_sentiment = assign_scores(raw_data)
+        data_with_directions = assign_directions(data_with_sentiment)
+        cleaned_data = preprocess_data(data_with_directions)
 
-        # Extract and merge data
-        data = extract_and_merge(pdf_path, csv_path)    
-        
-        # Assign sentiment scores
-        data = assign_scores(data)
-        
-        # Assign directions
-        data = assign_directions(data)
-        
-        # Preprocess the data
-        data_cleaned = preprocess_data(data)
-        
+        # Display sentiment counts
+        counts = sentiment_counts(cleaned_data)
+        logger.info(f"{company_name} Sentiment Counts:")
+        logger.info(counts)
+
         # Prepare dataset
-        train_dataset, test_dataset, y_train = prepare_dataset(data_cleaned, tokenizer)
-        
-        # Compute class weights
+        train_dataset, test_dataset, y_train = prepare_dataset(cleaned_data, tokenizer)
         class_weights = compute_class_weights(y_train)
-        
+
         # Train and evaluate
-        train_and_evaluate(MODEL_NAME, train_dataset, test_dataset, class_weights)
-    
-        if model:
-            # Compute SHAP values
-            shap_values, subset = compute_shap_values(model, test_dataset)
+        model, metrics, report = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset, class_weights)
 
-            # Plot SHAP summary
-            plot_shap_summary(shap_values, tokenizer.get_vocab().keys())
+        if model is not None:
+            results = {
+                'metrics': metrics,
+                'report': report
+            }
+            return results
+        else:
+            logger.warning(f"Model training failed for {company_name}")
 
-            # Save SHAP summary plot
-            shap_path = os.path.join(f'{company_name}_shap_summary.png')
-            plt.figure(figsize=(10, 6))
-            shap.summary_plot(shap_values, plot_type="bar", show=False)
-            plt.tight_layout()
-            plt.savefig(shap_path)
-            plt.close()
-
-            print(f"SHAP summary plot saved for {company_name} at {shap_path}")
     except Exception as e:
-        logger.error(f"Error in main: {str(e)}")
+        logger.error(f"Error processing {company_name}: {str(e)}")
         logger.error(traceback.format_exc())
+        raise
 
 if __name__ == "__main__":
     # Define paths for each company
@@ -372,4 +341,9 @@ if __name__ == "__main__":
     }
 
     for company_name, paths in companies.items():
-        main(company_name, paths['pdf_path'], paths['csv_path'])
+        try:
+            logger.info(f"Starting processing for {company_name}")
+            results = main(company_name, paths['pdf_path'], paths['csv_path'])
+            # Handle results (saving, further processing, etc.)
+        except Exception as e:
+            logger.error(f"Failed to process {company_name}: {str(e)}")
