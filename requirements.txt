@@ -16,3 +16,4 @@ plotly
 yfinance
 beautifulsoup4
 nlpaug
+imbalanced-learn

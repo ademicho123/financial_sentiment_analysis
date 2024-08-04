@@ -32,9 +32,17 @@ from nltk.corpus import stopwords
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import confusion_matrix
 from datasets import Dataset, concatenate_datasets
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import torch.nn as nn
+import torch.optim as optim
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from accelerate import Accelerator
 import logging
 import traceback
@@ -50,7 +58,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Define the model name
-MODEL_NAME = 'distilbert-base-uncased'
+MODEL_NAME = 'distilbert/distilbert-base-uncased'
 
 # Function to extract sentences from PDFs using PyPDF2
 def read_pdf_sentences(file_path):
@@ -179,12 +187,12 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 # Prepare Dataset Function
-def prepare_dataset(data, tokenizer, sample_frac=0.05, random_state=42, chunk_size=100):
+def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_size=100):
     print("Preparing dataset...")
     data = data.sample(frac=sample_frac, random_state=random_state).reset_index(drop=True)
     
     def tokenize_function(examples):
-        tokenized = tokenizer(examples['content'], truncation=True, padding='max_length', max_length=512)
+        tokenized = tokenizer(examples['content'], truncation=True, padding='max_length', max_length=256)
         return {
             'input_ids': tokenized['input_ids'],
             'attention_mask': tokenized['attention_mask']
@@ -193,11 +201,15 @@ def prepare_dataset(data, tokenizer, sample_frac=0.05, random_state=42, chunk_si
     datasets = []
     for i in range(0, len(data), chunk_size):
         chunk = data.iloc[i:i+chunk_size]
-        dataset_dict = Dataset.from_pandas(chunk)
-        dataset_dict = dataset_dict.map(tokenize_function, batched=True, remove_columns=['content', 'sentiment'])
-        datasets.append(dataset_dict)
-        del chunk, dataset_dict
+        if not chunk.empty:
+            dataset_dict = Dataset.from_pandas(chunk)
+            dataset_dict = dataset_dict.map(tokenize_function, batched=True, remove_columns=['content', 'sentiment'])
+            datasets.append(dataset_dict)
+        del chunk
         gc.collect()
+    
+    if not datasets:
+        raise ValueError("No valid datasets created. Check your input data.")
     
     dataset = concatenate_datasets(datasets)
     del datasets
@@ -212,57 +224,99 @@ def prepare_dataset(data, tokenizer, sample_frac=0.05, random_state=42, chunk_si
     train_dataset = train_testvalid['train']
     test_dataset = test_valid['test']
     
-    y_train = train_dataset['labels']
+    # Convert to numpy arrays for resampling
+    X_train = np.array(train_dataset['input_ids'])
+    y_train = np.array(train_dataset['labels'])
+    attention_masks = np.array(train_dataset['attention_mask'])
     
-    print("Dataset prepared with train and test splits.")
-    return train_dataset, test_dataset, y_train
+    # Combine input_ids and attention_masks
+    X_combined = np.column_stack((X_train, attention_masks))
+    
+    # Define resampling strategy
+    over = SMOTE(sampling_strategy='auto', random_state=random_state)
+    under = RandomUnderSampler(sampling_strategy='auto', random_state=random_state)
+    
+    # Create a pipeline with SMOTE and RandomUnderSampler
+    resampling = Pipeline([('over', over), ('under', under)])
+    
+    # Apply resampling
+    X_resampled, y_resampled = resampling.fit_resample(X_combined, y_train)
+    
+    # Split X_resampled back into input_ids and attention_masks
+    X_resampled_input_ids = X_resampled[:, :256]  # Assuming max_length is 256
+    X_resampled_attention_masks = X_resampled[:, 256:]
+    
+    # Create a new dataset with resampled data
+    resampled_train_dataset = Dataset.from_dict({
+        'input_ids': X_resampled_input_ids.tolist(),
+        'attention_mask': X_resampled_attention_masks.tolist(),
+        'labels': y_resampled.tolist()
+    })
+    
+    print(f"Dataset prepared with train size: {len(resampled_train_dataset)} and test size: {len(test_dataset)}")
+    return resampled_train_dataset, test_dataset
 
-# Compute Class Weights
-def compute_class_weights(y_train):
-    y_train = np.array(y_train)
-    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-    return class_weights
-
-# Training and Evaluation Function
-def train_and_evaluate(model_name, train_dataset, test_dataset, class_weights):
+def train_and_evaluate(model_name, train_dataset, test_dataset):
     print("Training and evaluating model...")
     
     try:
         accelerator = Accelerator()
         model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
-        optimizer = AdamW(model.parameters(), lr=5e-5)
+        optimizer = AdamW(model.parameters(), lr=1e-5)
+        
+        scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
+        
+        loss_fn = nn.CrossEntropyLoss()
         
         def collate_fn(batch):
+            input_ids = torch.tensor([item['input_ids'] for item in batch])
+            attention_mask = torch.tensor([item['attention_mask'] for item in batch])
+            labels = torch.tensor([item['labels'] for item in batch])
             return {
-                'input_ids': torch.stack([item['input_ids'].squeeze() for item in batch]),
-                'attention_mask': torch.stack([item['attention_mask'].squeeze() for item in batch]),
-                'labels': torch.tensor([item['labels'] for item in batch])
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'labels': labels
             }
-        
+    
         train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
         test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collate_fn)
         
-        model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(
-            model, optimizer, train_dataloader, test_dataloader
+        model, optimizer, train_dataloader, test_dataloader, scheduler = accelerator.prepare(
+            model, optimizer, train_dataloader, test_dataloader, scheduler
         )
 
         print("Starting training...")
         model.train()
-        accumulation_steps = 4  # Accumulate gradients over 4 batches
-        for epoch in range(1):  # 3 epochs
+        accumulation_steps = 4
+        for epoch in range(2):
+            total_loss = 0
             for i, batch in enumerate(train_dataloader):
+                # Add error checking for batch
+                if any(v.nelement() == 0 for v in batch.values()):
+                    print(f"Empty batch encountered at step {i}. Skipping.")
+                    continue
+                
+                # Print batch shapes for debugging
+                print(f"Batch shapes - input_ids: {batch['input_ids'].shape}, "
+                      f"attention_mask: {batch['attention_mask'].shape}, "
+                      f"labels: {batch['labels'].shape}")
+                
                 outputs = model(**batch)
-                loss = outputs.loss / accumulation_steps
+                loss = loss_fn(outputs.logits, batch['labels']) / accumulation_steps
                 accelerator.backward(loss)
+                total_loss += loss.item() * accumulation_steps
                 
                 if (i + 1) % accumulation_steps == 0:
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
                 
                 if i % 100 == 0:
                     print(f"Epoch {epoch+1}, Step {i}, Loss: {loss.item()*accumulation_steps}")
             
-            # Garbage collection after each epoch
+            avg_loss = total_loss / len(train_dataloader)
+            print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss}")
+            
             gc.collect()
             torch.cuda.empty_cache()
         
@@ -279,14 +333,39 @@ def train_and_evaluate(model_name, train_dataset, test_dataset, class_weights):
                 all_labels.extend(accelerator.gather(batch['labels']).cpu().numpy())
         
         accuracy = accuracy_score(all_labels, all_preds)
-        report = classification_report(all_labels, all_preds, output_dict=True)
+        report = classification_report(all_labels, all_preds, target_names=['bullish', 'neutral', 'bearish'])
         
-        return model, {'accuracy': accuracy}, report
+        return model, {'accuracy': accuracy}, report, all_labels, all_preds
     
     except Exception as e:
         print(f"An error occurred: {str(e)}")
-        return None, None, None
-        
+        print(f"Error details: {traceback.format_exc()}")
+        return None, None, None, None, None
+
+def create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds):
+    # Create confusion matrix
+    cm = confusion_matrix(all_labels, all_preds)
+    cm_df = pd.DataFrame(cm, index=['True Bullish', 'True Neutral', 'True Bearish'],
+                         columns=['Pred Bullish', 'Pred Neutral', 'Pred Bearish'])
+    
+    # Prepare data for the comprehensive report
+    report_data = {
+        'Company': company_name,
+        'Accuracy': metrics['accuracy'],
+        'Confusion Matrix': cm_df.to_json(),
+        'Precision (Bullish)': report_df.loc['0', 'precision'],
+        'Precision (Neutral)': report_df.loc['1', 'precision'],
+        'Precision (Bearish)': report_df.loc['2', 'precision'],
+        'Recall (Bullish)': report_df.loc['0', 'recall'],
+        'Recall (Neutral)': report_df.loc['1', 'recall'],
+        'Recall (Bearish)': report_df.loc['2', 'recall'],
+        'F1-Score (Bullish)': report_df.loc['0', 'f1-score'],
+        'F1-Score (Neutral)': report_df.loc['1', 'f1-score'],
+        'F1-Score (Bearish)': report_df.loc['2', 'f1-score'],
+    }
+    
+    return pd.DataFrame([report_data])
+
 def main(company_name, pdf_path, csv_path):
     try:
         logger.info(f"Processing {company_name}...")
@@ -303,25 +382,36 @@ def main(company_name, pdf_path, csv_path):
         logger.info(counts)
 
         # Prepare dataset
-        train_dataset, test_dataset, y_train = prepare_dataset(cleaned_data, tokenizer)
-        class_weights = compute_class_weights(y_train)
+        train_dataset, test_dataset = prepare_dataset(cleaned_data, tokenizer)
 
         # Train and evaluate
-        model, metrics, report = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset, class_weights)
+        model, metrics, report, all_labels, all_preds = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset)
 
-        if model is not None:
-            results = {
-                'metrics': metrics,
-                'report': report
-            }
-            return results
+        if model is not None and metrics is not None and report is not None:
+            # Display the evaluation metrics
+            logger.info(f"Evaluation Metrics for {company_name}:")
+            logger.info(f"Accuracy: {metrics['accuracy']}")
+            
+            # Display the classification report
+            logger.info(f"Classification Report for {company_name}:")
+            logger.info(report)
+
+            # Convert the report to a DataFrame
+            report_dict = classification_report_to_dict(report)
+            report_df = pd.DataFrame(report_dict).transpose()
+
+            # Create comprehensive report
+            comprehensive_report = create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds)
+
+            return comprehensive_report
         else:
             logger.warning(f"Model training failed for {company_name}")
+            return None
 
     except Exception as e:
         logger.error(f"Error processing {company_name}: {str(e)}")
         logger.error(traceback.format_exc())
-        raise
+        return None
 
 if __name__ == "__main__":
     # Define paths for each company
@@ -340,10 +430,23 @@ if __name__ == "__main__":
         }
     }
 
+    all_reports = []
+
     for company_name, paths in companies.items():
         try:
             logger.info(f"Starting processing for {company_name}")
-            results = main(company_name, paths['pdf_path'], paths['csv_path'])
-            # Handle results (saving, further processing, etc.)
+            company_report = main(company_name, paths['pdf_path'], paths['csv_path'])
+            
+            if company_report is not None:
+                all_reports.append(company_report)
+            
         except Exception as e:
             logger.error(f"Failed to process {company_name}: {str(e)}")
+
+    # Combine all reports into a single DataFrame
+    if all_reports:
+        combined_report = pd.concat(all_reports, ignore_index=True)
+        combined_report.to_csv('comprehensive_classification_report.csv', index=False)
+        logger.info("Comprehensive classification report for all companies saved to CSV.")
+    else:
+        logger.warning("No reports were generated.")
