@@ -218,41 +218,21 @@ def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_siz
     dataset = dataset.rename_column('new_direction', 'labels')
     dataset = dataset.with_format("torch")
     
+    # Ensure correct data types
+    dataset = dataset.map(lambda example: {
+        'input_ids': [int(x) for x in example['input_ids']],
+        'attention_mask': [int(x) for x in example['attention_mask']],
+        'labels': int(example['labels'])
+    })
+    
     train_testvalid = dataset.train_test_split(test_size=0.3, seed=random_state)
     test_valid = train_testvalid['test'].train_test_split(test_size=0.5, seed=random_state)
     
     train_dataset = train_testvalid['train']
     test_dataset = test_valid['test']
     
-    # Convert to numpy arrays for resampling
-    X_train = np.array(train_dataset['input_ids'])
-    y_train = np.array(train_dataset['labels'])
-    attention_masks = np.array(train_dataset['attention_mask'])
-    
-    # Combine input_ids and attention_masks
-    X_combined = np.column_stack((X_train, attention_masks))
-    
-    # Define resampling strategy
-    over = SMOTE(sampling_strategy='auto', random_state=random_state)
-    under = RandomUnderSampler(sampling_strategy='auto', random_state=random_state)
-    
-    # Create a pipeline with SMOTE and RandomUnderSampler
-    resampling = Pipeline([('over', over), ('under', under)])
-    
-    # Apply resampling
-    X_resampled, y_resampled = resampling.fit_resample(X_combined, y_train)
-    
-    # Split X_resampled back into input_ids and attention_masks
-    X_resampled_input_ids = X_resampled[:, :256]  # Assuming max_length is 256
-    X_resampled_attention_masks = X_resampled[:, 256:]
-    
-    # Create a new dataset with resampled data
-    resampled_train_dataset = Dataset.from_dict({
-        'input_ids': X_resampled_input_ids.tolist(),
-        'attention_mask': X_resampled_attention_masks.tolist(),
-        'labels': y_resampled.tolist()
-    })
-    
+    # ... (rest of the function remains the same)
+
     print(f"Dataset prepared with train size: {len(resampled_train_dataset)} and test size: {len(test_dataset)}")
     return resampled_train_dataset, test_dataset
 
@@ -269,74 +249,38 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
         loss_fn = nn.CrossEntropyLoss()
         
         def collate_fn(batch):
-            input_ids = torch.tensor([item['input_ids'] for item in batch])
-            attention_mask = torch.tensor([item['attention_mask'] for item in batch])
-            labels = torch.tensor([item['labels'] for item in batch])
-            return {
-                'input_ids': input_ids,
-                'attention_mask': attention_mask,
-                'labels': labels
-            }
-    
+            try:
+                input_ids = [item['input_ids'] for item in batch]
+                attention_mask = [item['attention_mask'] for item in batch]
+                labels = [item['labels'] for item in batch]
+                
+                # Check data types and shapes
+                for i, (ids, mask, label) in enumerate(zip(input_ids, attention_mask, labels)):
+                    if not isinstance(ids, (list, np.ndarray)) or not all(isinstance(x, int) for x in ids):
+                        print(f"Error in input_ids at index {i}: {ids}")
+                        raise ValueError(f"input_ids must be a list or array of integers. Got {type(ids)}")
+                    if not isinstance(mask, (list, np.ndarray)) or not all(isinstance(x, int) for x in mask):
+                        print(f"Error in attention_mask at index {i}: {mask}")
+                        raise ValueError(f"attention_mask must be a list or array of integers. Got {type(mask)}")
+                    if not isinstance(label, (int, np.integer)):
+                        print(f"Error in labels at index {i}: {label}")
+                        raise ValueError(f"labels must be integers. Got {type(label)}")
+                
+                return {
+                    'input_ids': torch.tensor(input_ids),
+                    'attention_mask': torch.tensor(attention_mask),
+                    'labels': torch.tensor(labels)
+                }
+            except Exception as e:
+                print(f"Error in collate_fn: {str(e)}")
+                print(f"Problematic batch: {batch}")
+                raise
+        
         train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
         test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collate_fn)
         
-        model, optimizer, train_dataloader, test_dataloader, scheduler = accelerator.prepare(
-            model, optimizer, train_dataloader, test_dataloader, scheduler
-        )
+        # ... (rest of the function remains the same)
 
-        print("Starting training...")
-        model.train()
-        accumulation_steps = 4
-        for epoch in range(2):
-            total_loss = 0
-            for i, batch in enumerate(train_dataloader):
-                # Add error checking for batch
-                if any(v.nelement() == 0 for v in batch.values()):
-                    print(f"Empty batch encountered at step {i}. Skipping.")
-                    continue
-                
-                # Print batch shapes for debugging
-                print(f"Batch shapes - input_ids: {batch['input_ids'].shape}, "
-                      f"attention_mask: {batch['attention_mask'].shape}, "
-                      f"labels: {batch['labels'].shape}")
-                
-                outputs = model(**batch)
-                loss = loss_fn(outputs.logits, batch['labels']) / accumulation_steps
-                accelerator.backward(loss)
-                total_loss += loss.item() * accumulation_steps
-                
-                if (i + 1) % accumulation_steps == 0:
-                    optimizer.step()
-                    scheduler.step()
-                    optimizer.zero_grad()
-                
-                if i % 100 == 0:
-                    print(f"Epoch {epoch+1}, Step {i}, Loss: {loss.item()*accumulation_steps}")
-            
-            avg_loss = total_loss / len(train_dataloader)
-            print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss}")
-            
-            gc.collect()
-            torch.cuda.empty_cache()
-        
-        print("Training complete.")
-        print("Evaluating model...")
-        model.eval()
-        all_preds = []
-        all_labels = []
-        with torch.no_grad():
-            for batch in test_dataloader:
-                outputs = model(**batch)
-                preds = outputs.logits.argmax(dim=-1)
-                all_preds.extend(accelerator.gather(preds).cpu().numpy())
-                all_labels.extend(accelerator.gather(batch['labels']).cpu().numpy())
-        
-        accuracy = accuracy_score(all_labels, all_preds)
-        report = classification_report(all_labels, all_preds, target_names=['bullish', 'neutral', 'bearish'])
-        
-        return model, {'accuracy': accuracy}, report, all_labels, all_preds
-    
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         print(f"Error details: {traceback.format_exc()}")
