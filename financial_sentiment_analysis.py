@@ -189,7 +189,7 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 # Prepare Dataset Function
-def prepare_dataset(data, tokenizer, sample_frac=0.15, random_state=42, chunk_size=100):
+def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_size=100):
     print("Preparing dataset...")
     data = data.sample(frac=sample_frac, random_state=random_state).reset_index(drop=True)
     
@@ -198,6 +198,8 @@ def prepare_dataset(data, tokenizer, sample_frac=0.15, random_state=42, chunk_si
     augmented_data = []
     for _, row in data.iterrows():
         augmented_text = aug.augment(row['content'])
+        if isinstance(augmented_text, list):
+            augmented_text = ' '.join(augmented_text)  # Join the list into a single string
         augmented_data.append({'content': augmented_text, 'new_direction': row['new_direction']})
     
     augmented_df = pd.DataFrame(augmented_data)
@@ -388,11 +390,18 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
                 preds = outputs.logits.argmax(dim=-1)
                 all_preds.extend(accelerator.gather(preds).cpu().numpy())
                 all_labels.extend(accelerator.gather(batch['labels']).cpu().numpy())
-        
+    
         accuracy = accuracy_score(all_labels, all_preds)
-        report = classification_report(all_labels, all_preds, target_names=['bullish', 'neutral', 'bearish'])
-        
-        return model, {'accuracy': accuracy}, report, all_labels, all_preds
+    
+        # Get unique labels from the predictions and true labels
+        unique_labels = sorted(set(all_labels) | set(all_preds))
+        label_names = ['bullish', 'neutral', 'bearish']
+        target_names = [label_names[i] for i in unique_labels if i < len(label_names)]
+    
+        report = classification_report(all_labels, all_preds, target_names=target_names, output_dict=True)
+        report_df = pd.DataFrame(report).transpose()
+    
+        return model, {'accuracy': accuracy}, report_df, all_labels, all_preds
     
     except Exception as e:
         print(f"An error occurred in train_and_evaluate: {str(e)}")
@@ -410,16 +419,22 @@ def create_comprehensive_report(company_name, metrics, report_df, all_labels, al
         'Company': company_name,
         'Accuracy': metrics['accuracy'],
         'Confusion Matrix': cm_df.to_json(),
-        'Precision (Bullish)': report_df.loc['0', 'precision'],
-        'Precision (Neutral)': report_df.loc['1', 'precision'],
-        'Precision (Bearish)': report_df.loc['2', 'precision'],
-        'Recall (Bullish)': report_df.loc['0', 'recall'],
-        'Recall (Neutral)': report_df.loc['1', 'recall'],
-        'Recall (Bearish)': report_df.loc['2', 'recall'],
-        'F1-Score (Bullish)': report_df.loc['0', 'f1-score'],
-        'F1-Score (Neutral)': report_df.loc['1', 'f1-score'],
-        'F1-Score (Bearish)': report_df.loc['2', 'f1-score'],
     }
+    
+    # Add precision, recall, and F1-score for each class if available
+    for class_label, class_name in zip(['0', '1', '2'], ['Bullish', 'Neutral', 'Bearish']):
+        if class_label in report_df.index:
+            report_data.update({
+                f'Precision ({class_name})': report_df.loc[class_label, 'precision'],
+                f'Recall ({class_name})': report_df.loc[class_label, 'recall'],
+                f'F1-Score ({class_name})': report_df.loc[class_label, 'f1-score'],
+            })
+        else:
+            report_data.update({
+                f'Precision ({class_name})': None,
+                f'Recall ({class_name})': None,
+                f'F1-Score ({class_name})': None,
+            })
     
     return pd.DataFrame([report_data])
 
