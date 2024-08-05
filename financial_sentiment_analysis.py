@@ -458,24 +458,20 @@ def main(company_name, pdf_path, csv_path):
 
         # Train and evaluate
         result = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset)
-        
+    
         if result is None:
             logger.error(f"Training and evaluation failed for {company_name}")
             return None
 
-        model, metrics, report, all_labels, all_preds = result
+        model, metrics, report_df, all_labels, all_preds = result
 
         # Display the evaluation metrics
         logger.info(f"Evaluation Metrics for {company_name}:")
         logger.info(f"Accuracy: {metrics['accuracy']}")
-        
+    
         # Display the classification report
         logger.info(f"Classification Report for {company_name}:")
-        logger.info(report)
-
-        # Convert the report to a DataFrame
-        report_dict = classification_report_to_dict(report)
-        report_df = pd.DataFrame(report_dict).transpose()
+        logger.info(report_df)
 
         # Create comprehensive report
         comprehensive_report = create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds)
