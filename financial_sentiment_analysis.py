@@ -231,8 +231,35 @@ def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_siz
     train_dataset = train_testvalid['train']
     test_dataset = test_valid['test']
     
-    # ... (rest of the function remains the same)
-
+    # Convert to numpy arrays for resampling
+    X_train = np.array(train_dataset['input_ids'])
+    y_train = np.array(train_dataset['labels'])
+    attention_masks = np.array(train_dataset['attention_mask'])
+    
+    # Combine input_ids and attention_masks
+    X_combined = np.column_stack((X_train, attention_masks))
+    
+    # Define resampling strategy
+    over = SMOTE(sampling_strategy='auto', random_state=random_state)
+    under = RandomUnderSampler(sampling_strategy='auto', random_state=random_state)
+    
+    # Create a pipeline with SMOTE and RandomUnderSampler
+    resampling = Pipeline([('over', over), ('under', under)])
+    
+    # Apply resampling
+    X_resampled, y_resampled = resampling.fit_resample(X_combined, y_train)
+    
+    # Split X_resampled back into input_ids and attention_masks
+    X_resampled_input_ids = X_resampled[:, :256]  # Assuming max_length is 256
+    X_resampled_attention_masks = X_resampled[:, 256:]
+    
+    # Create a new dataset with resampled data
+    resampled_train_dataset = Dataset.from_dict({
+        'input_ids': X_resampled_input_ids.tolist(),
+        'attention_mask': X_resampled_attention_masks.tolist(),
+        'labels': y_resampled.tolist()
+    })
+    
     print(f"Dataset prepared with train size: {len(resampled_train_dataset)} and test size: {len(test_dataset)}")
     return resampled_train_dataset, test_dataset
 
@@ -275,16 +302,60 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
                 print(f"Error in collate_fn: {str(e)}")
                 print(f"Problematic batch: {batch}")
                 raise
-        
+
         train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
         test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collate_fn)
         
-        # ... (rest of the function remains the same)
+        model, optimizer, train_dataloader, test_dataloader, scheduler = accelerator.prepare(
+            model, optimizer, train_dataloader, test_dataloader, scheduler
+        )
 
+        print("Starting training...")
+        model.train()
+        accumulation_steps = 4
+        for epoch in range(2):
+            total_loss = 0
+            for i, batch in enumerate(train_dataloader):
+                outputs = model(**batch)
+                loss = loss_fn(outputs.logits, batch['labels']) / accumulation_steps
+                accelerator.backward(loss)
+                total_loss += loss.item() * accumulation_steps
+                
+                if (i + 1) % accumulation_steps == 0:
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                
+                if i % 100 == 0:
+                    print(f"Epoch {epoch+1}, Step {i}, Loss: {loss.item()*accumulation_steps}")
+            
+            avg_loss = total_loss / len(train_dataloader)
+            print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss}")
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+        
+        print("Training complete.")
+        print("Evaluating model...")
+        model.eval()
+        all_preds = []
+        all_labels = []
+        with torch.no_grad():
+            for batch in test_dataloader:
+                outputs = model(**batch)
+                preds = outputs.logits.argmax(dim=-1)
+                all_preds.extend(accelerator.gather(preds).cpu().numpy())
+                all_labels.extend(accelerator.gather(batch['labels']).cpu().numpy())
+        
+        accuracy = accuracy_score(all_labels, all_preds)
+        report = classification_report(all_labels, all_preds, target_names=['bullish', 'neutral', 'bearish'])
+        
+        return model, {'accuracy': accuracy}, report, all_labels, all_preds
+    
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        print(f"An error occurred in train_and_evaluate: {str(e)}")
         print(f"Error details: {traceback.format_exc()}")
-        return None, None, None, None, None
+        return None
 
 def create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds):
     # Create confusion matrix
@@ -329,28 +400,30 @@ def main(company_name, pdf_path, csv_path):
         train_dataset, test_dataset = prepare_dataset(cleaned_data, tokenizer)
 
         # Train and evaluate
-        model, metrics, report, all_labels, all_preds = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset)
-
-        if model is not None and metrics is not None and report is not None:
-            # Display the evaluation metrics
-            logger.info(f"Evaluation Metrics for {company_name}:")
-            logger.info(f"Accuracy: {metrics['accuracy']}")
-            
-            # Display the classification report
-            logger.info(f"Classification Report for {company_name}:")
-            logger.info(report)
-
-            # Convert the report to a DataFrame
-            report_dict = classification_report_to_dict(report)
-            report_df = pd.DataFrame(report_dict).transpose()
-
-            # Create comprehensive report
-            comprehensive_report = create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds)
-
-            return comprehensive_report
-        else:
-            logger.warning(f"Model training failed for {company_name}")
+        result = train_and_evaluate(MODEL_NAME, train_dataset, test_dataset)
+        
+        if result is None:
+            logger.error(f"Training and evaluation failed for {company_name}")
             return None
+
+        model, metrics, report, all_labels, all_preds = result
+
+        # Display the evaluation metrics
+        logger.info(f"Evaluation Metrics for {company_name}:")
+        logger.info(f"Accuracy: {metrics['accuracy']}")
+        
+        # Display the classification report
+        logger.info(f"Classification Report for {company_name}:")
+        logger.info(report)
+
+        # Convert the report to a DataFrame
+        report_dict = classification_report_to_dict(report)
+        report_df = pd.DataFrame(report_dict).transpose()
+
+        # Create comprehensive report
+        comprehensive_report = create_comprehensive_report(company_name, metrics, report_df, all_labels, all_preds)
+
+        return comprehensive_report
 
     except Exception as e:
         logger.error(f"Error processing {company_name}: {str(e)}")
