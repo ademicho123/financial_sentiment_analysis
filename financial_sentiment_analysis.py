@@ -277,21 +277,22 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
         
         def collate_fn(batch):
             try:
-                input_ids = [item['input_ids'] for item in batch]
-                attention_mask = [item['attention_mask'] for item in batch]
-                labels = [item['labels'] for item in batch]
+                input_ids = []
+                attention_mask = []
+                labels = []
                 
-                # Check data types and shapes
-                for i, (ids, mask, label) in enumerate(zip(input_ids, attention_mask, labels)):
-                    if not isinstance(ids, (list, np.ndarray)) or not all(isinstance(x, int) for x in ids):
-                        print(f"Error in input_ids at index {i}: {ids}")
-                        raise ValueError(f"input_ids must be a list or array of integers. Got {type(ids)}")
-                    if not isinstance(mask, (list, np.ndarray)) or not all(isinstance(x, int) for x in mask):
-                        print(f"Error in attention_mask at index {i}: {mask}")
-                        raise ValueError(f"attention_mask must be a list or array of integers. Got {type(mask)}")
-                    if not isinstance(label, (int, np.integer)):
-                        print(f"Error in labels at index {i}: {label}")
-                        raise ValueError(f"labels must be integers. Got {type(label)}")
+                for item in batch:
+                    if isinstance(item['input_ids'], torch.Tensor):
+                        input_ids.append(item['input_ids'].tolist())
+                    else:
+                        input_ids.append(item['input_ids'])
+                    
+                    if isinstance(item['attention_mask'], torch.Tensor):
+                        attention_mask.append(item['attention_mask'].tolist())
+                    else:
+                        attention_mask.append(item['attention_mask'])
+                    
+                    labels.append(item['labels'].item() if isinstance(item['labels'], torch.Tensor) else item['labels'])
                 
                 return {
                     'input_ids': torch.tensor(input_ids),
