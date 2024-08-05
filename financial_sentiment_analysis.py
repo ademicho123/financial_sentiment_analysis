@@ -38,11 +38,13 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.nn as nn
+from nlpaug.augmenter.word import SynonymAug
 import torch.optim as optim
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from accelerate import Accelerator
 import logging
 import traceback
@@ -58,7 +60,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Define the model name
-MODEL_NAME = 'distilbert/distilbert-base-uncased'
+MODEL_NAME = 'huawei-noah/TinyBERT_General_4L_312D'
 
 # Function to extract sentences from PDFs using PyPDF2
 def read_pdf_sentences(file_path):
@@ -187,9 +189,19 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 # Prepare Dataset Function
-def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_size=100):
+def prepare_dataset(data, tokenizer, sample_frac=0.15, random_state=42, chunk_size=100):
     print("Preparing dataset...")
     data = data.sample(frac=sample_frac, random_state=random_state).reset_index(drop=True)
+    
+    # Data augmentation
+    aug = SynonymAug(aug_src='wordnet')
+    augmented_data = []
+    for _, row in data.iterrows():
+        augmented_text = aug.augment(row['content'])
+        augmented_data.append({'content': augmented_text, 'new_direction': row['new_direction']})
+    
+    augmented_df = pd.DataFrame(augmented_data)
+    data = pd.concat([data, augmented_df], ignore_index=True)
     
     def tokenize_function(examples):
         tokenized = tokenizer(examples['content'], truncation=True, padding='max_length', max_length=256)
@@ -263,15 +275,42 @@ def prepare_dataset(data, tokenizer, sample_frac=0.1, random_state=42, chunk_siz
     print(f"Dataset prepared with train size: {len(resampled_train_dataset)} and test size: {len(test_dataset)}")
     return resampled_train_dataset, test_dataset
 
+def classification_report_to_dict(report):
+    """Convert the classification report string to a dictionary."""
+    lines = report.split('\n')
+    res = {}
+    for line in lines[2:-3]:  # skip header and footer
+        line = line.strip()
+        if line:
+            row = line.split()
+            if len(row) == 5:  # it's a regular row
+                class_name, precision, recall, f1_score, support = row
+                res[class_name] = {
+                    'precision': float(precision),
+                    'recall': float(recall),
+                    'f1-score': float(f1_score),
+                    'support': int(support)
+                }
+            elif len(row) == 4:  # it's the micro/macro avg row
+                class_name = ' '.join(row[:-3])
+                precision, recall, f1_score = row[-3:]
+                res[class_name] = {
+                    'precision': float(precision),
+                    'recall': float(recall),
+                    'f1-score': float(f1_score)
+                }
+    return res
+
 def train_and_evaluate(model_name, train_dataset, test_dataset):
     print("Training and evaluating model...")
     
     try:
         accelerator = Accelerator()
         model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
-        optimizer = AdamW(model.parameters(), lr=1e-5)
+        optimizer = AdamW(model.parameters(), lr=2e-5)  # Slightly increased learning rate
         
-        scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
+        # Use CosineAnnealingWarmRestarts for better learning rate scheduling
+        scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
         
         loss_fn = nn.CrossEntropyLoss()
         
@@ -304,8 +343,9 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
                 print(f"Problematic batch: {batch}")
                 raise
 
-        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
-        test_dataloader = DataLoader(test_dataset, batch_size=4, collate_fn=collate_fn)
+        # Increase batch size
+        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+        test_dataloader = DataLoader(test_dataset, batch_size=8, collate_fn=collate_fn)
         
         model, optimizer, train_dataloader, test_dataloader, scheduler = accelerator.prepare(
             model, optimizer, train_dataloader, test_dataloader, scheduler
@@ -313,8 +353,9 @@ def train_and_evaluate(model_name, train_dataset, test_dataset):
 
         print("Starting training...")
         model.train()
-        accumulation_steps = 4
-        for epoch in range(2):
+        num_epochs = 5  # Increased number of epochs
+        accumulation_steps = 2  # Reduced accumulation steps due to increased batch size
+        for epoch in range(num_epochs):
             total_loss = 0
             for i, batch in enumerate(train_dataloader):
                 outputs = model(**batch)
