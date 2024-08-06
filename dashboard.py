@@ -31,19 +31,22 @@ else:
 if input_text:
     st.header("Analysis Results")
     
-    results = analyze_text(input_text)
-    
-    for company, result in results.items():
-        st.subheader(f"{company} Analysis")
+    try:
+        results = analyze_text(input_text)
         
-        col1, col2 = st.columns(2)
-        col1.metric("Sentiment", result['sentiment'])
-        col2.metric("Sentiment Score", f"{result['score']:.2f}")
+        for company, result in results.items():
+            st.subheader(f"{company} Analysis")
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Sentiment", result['sentiment'])
+            col2.metric("Sentiment Score", f"{result['score']:.2f}")
+            
+            # Generate and display SHAP plot
+            st.subheader("SHAP Analysis")
+            shap_plot = generate_shap_plot(result['shap_values'])
+            st.pyplot(shap_plot)
         
-        # Generate and display SHAP plot
-        st.subheader("SHAP Analysis")
-        shap_plot = generate_shap_plot(result['shap_values'])
-        st.pyplot(shap_plot)
-        
-    st.subheader("Input Text")
-    st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
+        st.subheader("Input Text")
+        st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
+    except Exception as e:
+        st.error(f"An error occurred during analysis: {str(e)}")
