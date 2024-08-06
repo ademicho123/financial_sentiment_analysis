@@ -19,24 +19,35 @@ def read_pdf(file):
     return text
 
 def explain_shap_values(shap_values):
-    feature_names = shap_values.feature_names
-    values = shap_values.values[0]
-    
-    sorted_idx = np.argsort(np.abs(values))
-    top_features = [feature_names[i] for i in sorted_idx[-5:]]
-    top_values = [values[i] for i in sorted_idx[-5:]]
-    
-    explanation = "SHAP Analysis Explanation:\n\n"
-    explanation += "The SHAP (SHapley Additive exPlanations) graph shows how different words or features contribute to the model's prediction.\n\n"
-    explanation += "Top 5 influencing features:\n"
-    
-    for feature, value in zip(reversed(top_features), reversed(top_values)):
-        impact = "positively" if value > 0 else "negatively"
-        explanation += f"- '{feature}' impacts the prediction {impact} (SHAP value: {value:.4f})\n"
-    
-    explanation += "\nPositive SHAP values push the prediction towards a more positive sentiment, while negative values push towards a more negative sentiment."
-    
-    return explanation
+    try:
+        # Assuming shap_values is a 2D array with shape (n_features, n_classes)
+        values = shap_values.values
+        feature_names = shap_values.feature_names
+
+        # Sum absolute SHAP values across classes
+        total_impact = np.abs(values).sum(axis=1)
+        
+        # Get indices of top 5 features
+        top_indices = np.argsort(total_impact)[-5:][::-1]
+        
+        explanation = "SHAP Analysis Explanation:\n\n"
+        explanation += "The SHAP (SHapley Additive exPlanations) values show how different words or features contribute to the model's prediction for each class.\n\n"
+        explanation += "Top 5 influencing features:\n"
+        
+        for idx in top_indices:
+            feature = feature_names[idx]
+            impacts = values[idx]
+            explanation += f"- '{feature}':\n"
+            for class_idx, impact in enumerate(impacts):
+                class_name = ['bullish', 'neutral', 'bearish'][class_idx]
+                direction = "positively" if impact > 0 else "negatively"
+                explanation += f"    {class_name}: impacts {direction} (SHAP value: {impact:.4f})\n"
+        
+        explanation += "\nPositive SHAP values push the prediction towards the respective class, while negative values push away from it."
+        
+        return explanation
+    except Exception as e:
+        return f"An error occurred while generating SHAP explanation: {str(e)}"
 
 input_type = st.radio("Select input type:", ("Upload PDF", "Paste Text"))
 
@@ -60,15 +71,19 @@ if input_text:
         col2.metric("Sentiment Score", f"{result['score']:.2f}")
         col3.metric("Direction", result['direction'])
         
-        # Display SHAP plot
+        # Display SHAP plots
         st.subheader("SHAP Analysis")
-        fig, ax = plt.subplots(figsize=(10, 5))
-        shap.plots.waterfall(result['shap_values'][0][:, 0], max_display=10)
-        st.pyplot(fig)
+        shap_values = result['shap_values']
+        for i, class_name in enumerate(['Bullish', 'Neutral', 'Bearish']):
+            fig, ax = plt.subplots(figsize=(10, 5))
+            shap.plots.waterfall(shap_values[0, :, i], max_display=10, show=False)
+            plt.title(f"SHAP Values for {class_name} Class")
+            st.pyplot(fig)
+            plt.close(fig)
         
         # Add SHAP explanation
         st.subheader("SHAP Explanation")
-        explanation = explain_shap_values(result['shap_values'])
+        explanation = explain_shap_values(shap_values)
         st.text(explanation)
         
         st.subheader("Input Text")
