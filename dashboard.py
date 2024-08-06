@@ -40,10 +40,12 @@ if input_text:
         col2.metric("Sentiment Score", f"{result['score']:.2f}")
         col3.metric("Direction", result['direction'])
         
+        # Debug information
+        st.subheader("Debug Information")
         st.write("Preprocessed Text:", result['preprocessed_text'])
         st.write("SHAP Values Shape:", result['shap_values'].shape)
         st.write("SHAP Values Type:", type(result['shap_values']))
-
+        
         # Display SHAP plot
         st.subheader("SHAP Analysis")
         fig, ax = plt.subplots(figsize=(10, 5))
