@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from sentiment_predictor import analyze_text
-from shap_analysis import generate_shap_plot
 import PyPDF2
 import io
 
@@ -37,14 +36,10 @@ if input_text:
         for company, result in results.items():
             st.subheader(f"{company} Analysis")
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric("Sentiment", result['sentiment'])
             col2.metric("Sentiment Score", f"{result['score']:.2f}")
-            
-            # Generate and display SHAP plot
-            st.subheader("SHAP Analysis")
-            shap_plot = generate_shap_plot(result['shap_values'])
-            st.pyplot(shap_plot)
+            col3.metric("Direction", result['direction'])
         
         st.subheader("Input Text")
         st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)

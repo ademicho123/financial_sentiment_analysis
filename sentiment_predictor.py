@@ -1,6 +1,5 @@
 import pandas as pd
 import torch
-import shap
 from financial_sentiment_analysis import (
     preprocess_text,
     assign_sentiment_scores,
@@ -13,13 +12,6 @@ from financial_sentiment_analysis import (
 # Load the pre-trained model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
-
-# Create a SHAP explainer
-def model_wrapper(x):
-    inputs = tokenizer(x, return_tensors="pt", padding=True, truncation=True)
-    return model(**inputs).logits
-
-explainer = shap.Explainer(model_wrapper, tokenizer)
 
 def predict_sentiment(input_text):
     # Preprocess the input text
@@ -46,15 +38,11 @@ def predict_sentiment(input_text):
     direction_df = assign_directions(direction_df)
     direction = direction_df['direction'].iloc[0]
     
-    # Generate SHAP values
-    shap_values = explainer([preprocessed_text])
-    
     return {
         'sentiment': predicted_sentiment,
         'score': sentiment_score,
         'direction': direction,
-        'preprocessed_text': preprocessed_text,
-        'shap_values': shap_values
+        'preprocessed_text': preprocessed_text
     }
 
 def analyze_text(input_text):
