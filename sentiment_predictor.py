@@ -56,5 +56,13 @@ def predict_sentiment(input_text):
 def analyze_text(input_text):
     if not isinstance(input_text, str) or not input_text.strip():
         raise ValueError("Input text must be a non-empty string.")
+    # Preprocess the input text
+     preprocessed_text = preprocess_text(input_text)
+  
+     # Convert preprocessed text to a list (single example)
+    text_list = [preprocessed_text]
+  
+    # Make prediction
+    logits = model_predict(text_list)
     
     return predict_sentiment(input_text)
