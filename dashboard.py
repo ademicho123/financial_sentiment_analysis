@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from sentiment_predictor import analyze_text
 import PyPDF2
 import io
