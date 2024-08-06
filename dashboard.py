@@ -48,5 +48,8 @@ if input_text:
         
         st.subheader("Input Text")
         st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
+    except ValueError as ve:
+        st.error(f"Input Error: {str(ve)}")
     except Exception as e:
-        st.error(f"An error occurred during analysis: {str(e)}")
+        st.error(f"An unexpected error occurred during analysis: {str(e)}")
+        st.error("Please try again with different input or contact support if the problem persists.")

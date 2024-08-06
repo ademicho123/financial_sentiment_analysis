@@ -16,7 +16,8 @@ model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_label
 
 # Create a SHAP explainer
 def model_wrapper(x):
-    return model(**tokenizer(x, return_tensors="pt", padding=True, truncation=True)).logits
+    inputs = tokenizer(x, return_tensors="pt", padding=True, truncation=True)
+    return model(**inputs).logits
 
 explainer = shap.Explainer(model_wrapper, tokenizer)
 
@@ -57,6 +58,9 @@ def predict_sentiment(input_text):
     }
 
 def analyze_text(input_text):
+    if not isinstance(input_text, str) or not input_text.strip():
+        raise ValueError("Input text must be a non-empty string.")
+    
     results = {}
     for company in ['Lloyds', 'IAG', 'Vodafone']:
         # In a real scenario, you might want to use company-specific models here
