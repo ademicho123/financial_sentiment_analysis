@@ -4,6 +4,7 @@ from sentiment_predictor import analyze_text
 import PyPDF2
 import io
 import shap
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Financial Sentiment Analysis Dashboard", layout="wide")
 
@@ -39,10 +40,14 @@ if input_text:
         col2.metric("Sentiment Score", f"{result['score']:.2f}")
         col3.metric("Direction", result['direction'])
         
+        st.write("SHAP Values Shape:", result['shap_values'].shape)
+        st.write("SHAP Values:", result['shap_values'])
+
         # Display SHAP plot
         st.subheader("SHAP Analysis")
-        shap_plot = shap.plots.text(result['shap_values'][0])
-        st.pyplot(shap_plot)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        shap.plots.text(result['shap_values'][0][:, :, 1], matplotlib=True)
+        st.pyplot(fig)
         
         st.subheader("Input Text")
         st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)

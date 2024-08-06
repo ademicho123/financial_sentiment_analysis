@@ -14,18 +14,20 @@ from financial_sentiment_analysis import (
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
+def model_predict(text):
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    return outputs.logits
+
 def predict_sentiment(input_text):
     # Preprocess the input text
     preprocessed_text = preprocess_text(input_text)
     
-    # Tokenize the preprocessed text
-    inputs = tokenizer(preprocessed_text, return_tensors="pt", truncation=True, padding=True, max_length=256)
-    
     # Make prediction
-    with torch.no_grad():
-        outputs = model(**inputs)
-        predictions = torch.softmax(outputs.logits, dim=1)
-        predicted_class = torch.argmax(predictions, dim=1).item()
+    logits = model_predict(preprocessed_text)
+    predictions = torch.softmax(logits, dim=1)
+    predicted_class = torch.argmax(predictions, dim=1).item()
     
     # Map the predicted class to sentiment
     sentiment_map = {0: 'bullish', 1: 'neutral', 2: 'bearish'}
@@ -40,7 +42,7 @@ def predict_sentiment(input_text):
     direction = direction_df['direction'].iloc[0]
     
     # Generate SHAP values
-    explainer = shap.Explainer(model, tokenizer)
+    explainer = shap.Explainer(model_predict, tokenizer)
     shap_values = explainer([preprocessed_text])
     
     return {
