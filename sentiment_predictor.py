@@ -14,8 +14,9 @@ from financial_sentiment_analysis import (
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
-def model_predict(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+def model_predict(texts):
+    # Tokenize the text
+    inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
     with torch.no_grad():
         outputs = model(**inputs)
     return outputs.logits.squeeze().numpy()
@@ -25,7 +26,7 @@ def predict_sentiment(input_text):
     preprocessed_text = preprocess_text(input_text)
     
     # Make prediction
-    logits = model_predict(preprocessed_text)
+    logits = model_predict([preprocessed_text])  # Ensure this is a list
     predictions = torch.softmax(torch.tensor(logits), dim=0)
     predicted_class = torch.argmax(predictions).item()
     
@@ -42,11 +43,12 @@ def predict_sentiment(input_text):
     direction = direction_df['direction'].iloc[0]
     
     # Generate SHAP values
-    explainer = shap.Explainer(model_predict, tokenizer)
-    
     # Adjust how the input is provided to the SHAP explainer
+    explainer = shap.Explainer(model_predict, tokenizer)
+
+    # Wrap preprocessed text in a list (batch of one) for SHAP
     shap_values = explainer([preprocessed_text])
-    
+
     return {
         'sentiment': predicted_sentiment,
         'score': sentiment_score,
