@@ -43,6 +43,8 @@ def predict_sentiment(input_text):
     
     # Generate SHAP values
     explainer = shap.Explainer(model_predict, tokenizer)
+    
+    # Adjust how the input is provided to the SHAP explainer
     shap_values = explainer([preprocessed_text])
     
     return {
@@ -56,13 +58,5 @@ def predict_sentiment(input_text):
 def analyze_text(input_text):
     if not isinstance(input_text, str) or not input_text.strip():
         raise ValueError("Input text must be a non-empty string.")
-    # Preprocess the input text
-     preprocessed_text = preprocess_text(input_text)
-  
-     # Convert preprocessed text to a list (single example)
-    text_list = [preprocessed_text]
-  
-    # Make prediction
-    logits = model_predict(text_list)
     
     return predict_sentiment(input_text)
