@@ -15,7 +15,10 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 # Create a SHAP explainer
-explainer = shap.Explainer(model, tokenizer)
+def model_wrapper(x):
+    return model(**x).logits
+
+explainer = shap.Explainer(model_wrapper, tokenizer)
 
 def predict_sentiment(input_text):
     # Preprocess the input text
@@ -43,7 +46,7 @@ def predict_sentiment(input_text):
     direction = direction_df['direction'].iloc[0]
     
     # Generate SHAP values
-    shap_values = explainer(inputs)
+    shap_values = explainer([inputs.input_ids[0].tolist()])
     
     return {
         'sentiment': predicted_sentiment,
