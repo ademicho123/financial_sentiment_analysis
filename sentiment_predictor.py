@@ -15,35 +15,30 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
 def model_predict(texts):
+    texts = [str(text) for text in texts]
     inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
     with torch.no_grad():
         outputs = model(**inputs)
     return outputs.logits.numpy()
 
 def predict_sentiment(input_text):
-    # Preprocess the input text
     preprocessed_text = preprocess_text(input_text)
     
-    # Make prediction
     logits = model_predict([preprocessed_text])
     predictions = torch.softmax(torch.tensor(logits), dim=1)
     predicted_class = torch.argmax(predictions, dim=1).item()
     
-    # Map the predicted class to sentiment
     sentiment_map = {0: 'bullish', 1: 'neutral', 2: 'bearish'}
     predicted_sentiment = sentiment_map[predicted_class]
     
-    # Get the sentiment score
     sentiment_score = assign_sentiment_scores(preprocessed_text)
     
-    # Assign direction based on the score
     direction_df = pd.DataFrame({'sentiment': [sentiment_score]})
     direction_df = assign_directions(direction_df)
     direction = direction_df['direction'].iloc[0]
     
-    # Generate SHAP values
     explainer = shap.Explainer(model_predict, tokenizer)
-    shap_values = explainer([preprocessed_text])
+    shap_values = explainer([str(preprocessed_text)])
     
     return {
         'sentiment': predicted_sentiment,
