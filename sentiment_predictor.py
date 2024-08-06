@@ -18,7 +18,7 @@ def model_predict(text):
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
     with torch.no_grad():
         outputs = model(**inputs)
-    return outputs.logits
+    return outputs.logits.squeeze().numpy()
 
 def predict_sentiment(input_text):
     # Preprocess the input text
@@ -26,8 +26,8 @@ def predict_sentiment(input_text):
     
     # Make prediction
     logits = model_predict(preprocessed_text)
-    predictions = torch.softmax(logits, dim=1)
-    predicted_class = torch.argmax(predictions, dim=1).item()
+    predictions = torch.softmax(torch.tensor(logits), dim=0)
+    predicted_class = torch.argmax(predictions).item()
     
     # Map the predicted class to sentiment
     sentiment_map = {0: 'bullish', 1: 'neutral', 2: 'bearish'}
