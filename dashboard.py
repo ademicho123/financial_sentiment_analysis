@@ -9,7 +9,24 @@ st.set_page_config(page_title="Financial Sentiment Analysis Dashboard", layout="
 
 st.title("Financial Sentiment Analysis Dashboard")
 
+# Function to read PDF content
+def read_pdf(file):
+    pdf_reader = PyPDF2.PdfReader(file)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text()
+    return text
+
 input_type = st.radio("Select input type:", ("Upload PDF", "Paste Text"))
+
+input_text = ""  # Initialize input_text
+
+if input_type == "Upload PDF":
+    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    if uploaded_file is not None:
+        input_text = read_pdf(uploaded_file)
+else:
+    input_text = st.text_area("Enter financial news or report text:")
 
 if input_text:
     st.header("Analysis Results")
@@ -25,7 +42,7 @@ if input_text:
         
         # Generate and display SHAP plot
         st.subheader("SHAP Analysis")
-        shap_plot = shap.plots.text(result['shap_values'][0], display=False)
+        shap_plot = generate_shap_plot(result['shap_values'])
         st.pyplot(shap_plot)
         
     st.subheader("Input Text")
