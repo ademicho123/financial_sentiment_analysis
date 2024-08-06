@@ -1,5 +1,6 @@
 import pandas as pd
 import torch
+import shap
 from financial_sentiment_analysis import (
     preprocess_text,
     assign_sentiment_scores,
@@ -38,19 +39,20 @@ def predict_sentiment(input_text):
     direction_df = assign_directions(direction_df)
     direction = direction_df['direction'].iloc[0]
     
+    # Generate SHAP values
+    explainer = shap.Explainer(model, tokenizer)
+    shap_values = explainer([preprocessed_text])
+    
     return {
         'sentiment': predicted_sentiment,
         'score': sentiment_score,
         'direction': direction,
-        'preprocessed_text': preprocessed_text
+        'preprocessed_text': preprocessed_text,
+        'shap_values': shap_values
     }
 
 def analyze_text(input_text):
     if not isinstance(input_text, str) or not input_text.strip():
         raise ValueError("Input text must be a non-empty string.")
     
-    results = {}
-    for company in ['Lloyds', 'IAG', 'Vodafone']:
-        # In a real scenario, you might want to use company-specific models here
-        results[company] = predict_sentiment(input_text)
-    return results
+    return predict_sentiment(input_text)

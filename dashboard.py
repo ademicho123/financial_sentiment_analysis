@@ -3,6 +3,7 @@ import pandas as pd
 from sentiment_predictor import analyze_text
 import PyPDF2
 import io
+import shap
 
 st.set_page_config(page_title="Financial Sentiment Analysis Dashboard", layout="wide")
 
@@ -31,15 +32,17 @@ if input_text:
     st.header("Analysis Results")
     
     try:
-        results = analyze_text(input_text)
+        result = analyze_text(input_text)
         
-        for company, result in results.items():
-            st.subheader(f"{company} Analysis")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Sentiment", result['sentiment'])
-            col2.metric("Sentiment Score", f"{result['score']:.2f}")
-            col3.metric("Direction", result['direction'])
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Sentiment", result['sentiment'])
+        col2.metric("Sentiment Score", f"{result['score']:.2f}")
+        col3.metric("Direction", result['direction'])
+        
+        # Display SHAP plot
+        st.subheader("SHAP Analysis")
+        shap_plot = shap.plots.text(result['shap_values'][0])
+        st.pyplot(shap_plot)
         
         st.subheader("Input Text")
         st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
