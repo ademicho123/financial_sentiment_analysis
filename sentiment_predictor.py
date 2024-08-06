@@ -1,13 +1,13 @@
+import pandas as pd
+import torch
 import shap
-import numpy as np
 from financial_sentiment_analysis import (
     preprocess_text,
     assign_sentiment_scores,
     assign_directions,
     MODEL_NAME,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
-    torch
+    AutoTokenizer
 )
 
 # Load the pre-trained model and tokenizer
@@ -38,7 +38,8 @@ def predict_sentiment(input_text):
     sentiment_score = assign_sentiment_scores(preprocessed_text)
     
     # Assign direction based on the score
-    direction_df = assign_directions(pd.DataFrame({'sentiment': [sentiment_score]}))
+    direction_df = pd.DataFrame({'sentiment': [sentiment_score]})
+    direction_df = assign_directions(direction_df)
     direction = direction_df['direction'].iloc[0]
     
     # Generate SHAP values
@@ -55,5 +56,6 @@ def predict_sentiment(input_text):
 def analyze_text(input_text):
     results = {}
     for company in ['Lloyds', 'IAG', 'Vodafone']:
+        # In a real scenario, you might want to use company-specific models here
         results[company] = predict_sentiment(input_text)
     return results
