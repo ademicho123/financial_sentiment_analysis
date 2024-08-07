@@ -87,10 +87,17 @@ if st.button("Analyze Text"):
             st.subheader("SHAP Analysis")
             shap_values = result['shap_values']
             
+            # Debug information
+            st.subheader("Debug Information")
+            st.write("SHAP Values Type:", type(shap_values))
+            st.write("SHAP Values Shape:", shap_values.shape if hasattr(shap_values, 'shape') else "No shape attribute")
+            if isinstance(shap_values, shap.Explanation):
+                st.write("SHAP Values Features:", shap_values.feature_names)
+            
             if isinstance(shap_values, shap.Explanation):
                 for i, class_name in enumerate(['Bullish', 'Neutral', 'Bearish']):
                     fig, ax = plt.subplots(figsize=(10, 5))
-                    shap.plots.waterfall(shap_values[:, :, i], max_display=10, show=False)
+                    shap.plots.waterfall(shap_values[0, :, i], max_display=10, show=False)
                     plt.title(f"SHAP Values for {class_name} Class")
                     st.pyplot(fig)
                     plt.close(fig)
@@ -118,13 +125,6 @@ if st.button("Analyze Text"):
             st.subheader("SHAP Explanation")
             explanation = explain_shap_values(shap_values)
             st.text(explanation)
-            
-            # Debug information
-            st.subheader("Debug Information")
-            st.write("SHAP Values Type:", type(shap_values))
-            st.write("SHAP Values Shape:", shap_values.shape if hasattr(shap_values, 'shape') else "No shape attribute")
-            if isinstance(shap_values, shap.Explanation):
-                st.write("SHAP Values Features:", shap_values.feature_names)
             
             st.subheader("Input Text")
             st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
