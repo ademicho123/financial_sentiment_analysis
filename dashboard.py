@@ -78,53 +78,73 @@ if st.button("Analyze Text"):
         try:
             result = analyze_text(input_text)
             
+            # Debug: Print the entire result dictionary
+            st.subheader("Debug: Result Dictionary")
+            st.write(result)
+            
             col1, col2, col3 = st.columns(3)
-            col1.metric("Sentiment", result['sentiment'])
-            col2.metric("Sentiment Score", f"{result['score']:.2f}")
-            col3.metric("Direction", result['direction'])
+            col1.metric("Sentiment", result.get('sentiment', 'N/A'))
+            col2.metric("Sentiment Score", f"{result.get('score', 0):.2f}")
+            col3.metric("Direction", result.get('direction', 'N/A'))
             
             # Display SHAP plot
             st.subheader("SHAP Analysis")
-            shap_values = result['shap_values']
+            shap_values = result.get('shap_values')
             
-            # Debug information
-            st.subheader("Debug Information")
-            st.write("SHAP Values Type:", type(shap_values))
-            st.write("SHAP Values Shape:", shap_values.shape if hasattr(shap_values, 'shape') else "No shape attribute")
-            if isinstance(shap_values, shap.Explanation):
-                st.write("SHAP Values Features:", shap_values.feature_names)
-            
-            if isinstance(shap_values, shap.Explanation):
-                for i, class_name in enumerate(['Bullish', 'Neutral', 'Bearish']):
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    shap.plots.waterfall(shap_values[0, :, i], max_display=10, show=False)
-                    plt.title(f"SHAP Values for {class_name} Class")
-                    st.pyplot(fig)
-                    plt.close(fig)
-            elif isinstance(shap_values, np.ndarray):
-                if shap_values.ndim == 3:  # (samples, features, classes)
-                    for i, class_name in enumerate(['Bullish', 'Neutral', 'Bearish']):
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        shap.plots.waterfall(shap_values[0, :, i], max_display=10, show=False)
-                        plt.title(f"SHAP Values for {class_name} Class")
-                        st.pyplot(fig)
-                        plt.close(fig)
-                elif shap_values.ndim == 2:  # (features, classes)
-                    for i, class_name in enumerate(['Bullish', 'Neutral', 'Bearish']):
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        shap.plots.waterfall(shap_values[:, i], max_display=10, show=False)
-                        plt.title(f"SHAP Values for {class_name} Class")
-                        st.pyplot(fig)
-                        plt.close(fig)
-                else:
-                    st.write("Unable to display SHAP plot due to unexpected shape of SHAP values.")
+            if shap_values is None:
+                st.error("No SHAP values found in the result.")
             else:
-                st.write("Unable to display SHAP plot due to unexpected format of SHAP values.")
-            
-            # Add SHAP explanation
-            st.subheader("SHAP Explanation")
-            explanation = explain_shap_values(shap_values)
-            st.text(explanation)
+                # Debug information
+                st.subheader("Debug Information")
+                st.write("SHAP Values Type:", type(shap_values))
+                st.write("SHAP Values Shape:", shap_values.shape if hasattr(shap_values, 'shape') else "No shape attribute")
+                if isinstance(shap_values, shap.Explanation):
+                    st.write("SHAP Values Features:", shap_values.feature_names)
+                
+                # SHAP Plotting
+                direction = result.get('direction', '').lower()
+                direction_index = {'bullish': 0, 'neutral': 1, 'bearish': 2}.get(direction)
+                
+                if direction_index is None:
+                    st.error(f"Unknown direction: {direction}")
+                else:
+                    try:
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        shap.plots.waterfall(shap_values[0, :, direction_index], max_display=10, show=False)
+                        plt.title(f"SHAP Values for {direction.capitalize()} Direction")
+                        st.pyplot(fig)
+                        plt.close(fig)
+                    except Exception as e:
+                        st.error(f"Error creating SHAP plot: {str(e)}")
+                        
+                        # Fallback: create a simple bar plot
+                        values = shap_values.values[0, :, direction_index]
+                        top_features = np.argsort(np.abs(values))[-10:]  # Top 10 features
+                        
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax.barh(range(10), values[top_features])
+                        ax.set_yticks(range(10))
+                        ax.set_yticklabels([f"Feature {i}" for i in top_features])
+                        ax.set_title(f"Top 10 Feature Impacts for {direction.capitalize()} Direction")
+                        st.pyplot(fig)
+                        plt.close(fig)
+                    
+                    # SHAP Explanation
+                    st.subheader("SHAP Explanation")
+                    try:
+                        values = shap_values.values[0, :, direction_index]
+                        feature_names = shap_values.feature_names if shap_values.feature_names else [f"Feature {i}" for i in range(len(values))]
+                        
+                        top_features = np.argsort(np.abs(values))[-5:][::-1]  # Top 5 features
+                        
+                        explanation = f"Top 5 features influencing the {direction.capitalize()} direction:\n\n"
+                        for i, feature in enumerate(top_features, 1):
+                            impact = "positive" if values[feature] > 0 else "negative"
+                            explanation += f"{i}. {feature_names[feature]}: {impact} impact (value: {values[feature]:.4f})\n"
+                        
+                        st.text(explanation)
+                    except Exception as e:
+                        st.error(f"An error occurred while generating SHAP explanation: {str(e)}")
             
             st.subheader("Input Text")
             st.text(input_text[:1000] + "..." if len(input_text) > 1000 else input_text)
