@@ -69,12 +69,17 @@ if st.button("Analyze Text"):
         try:
             # Analyze the input text
             result = analyze_text(input_text)
+            result = predict_sentiment(input_text)
             
             # Display key metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Sentiment", result['sentiment'])
             col2.metric("Sentiment Score", f"{result['score']:.2f}")
             col3.metric("Direction", result['direction'])
+
+            # Display Attention Visualization
+            st.subheader("Attention Visualization")
+            st.pyplot(result['attention_plot'])
             
             # Display SHAP plot
             st.subheader("SHAP Analysis")

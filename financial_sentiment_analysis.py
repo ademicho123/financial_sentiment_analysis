@@ -303,12 +303,23 @@ def classification_report_to_dict(report):
                 }
     return res
 
+class TinyBERTForSequenceClassification(AutoModelForSequenceClassification):
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None):
+        outputs = super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True
+        )
+        return outputs
+    
 def train_and_evaluate(model_name, train_dataset, test_dataset):
     print("Training and evaluating model...")
     
     try:
         accelerator = Accelerator()
-        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
+        model = TinyBERTForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
         optimizer = AdamW(model.parameters(), lr=2e-5)  # Slightly increased learning rate
         
         # Use CosineAnnealingWarmRestarts for better learning rate scheduling
