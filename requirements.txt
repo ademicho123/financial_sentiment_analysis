@@ -17,4 +17,3 @@ yfinance
 beautifulsoup4
 nlpaug
 imbalanced-learn
-nlpaug
