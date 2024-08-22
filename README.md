@@ -8,6 +8,7 @@ This project provides a comprehensive financial sentiment analysis tool using na
 - Sentiment prediction (Bullish, Neutral, Bearish)
 - Sentiment scoring
 - SHAP (SHapley Additive exPlanations) analysis for model interpretability
+- Attention visualization for understanding model focus
 - Interactive visualizations
 
 ## Installation
@@ -38,7 +39,17 @@ streamlit run dashboard.py
 
 ## Model
 
-This project uses the `huawei-noah/TinyBERT_General_4L_312D` model for sentiment classification. The model is fine-tuned on financial texts to predict bullish, neutral, or bearish sentiments.
+The project evaluates multiple machine learning models for sentiment analysis:
+
+- TinyBERT (huawei-noah/TinyBERT_General_4L_312D)
+- AdaBoost
+- Support Vector Machine (SVM)
+- Random Forest
+- Naive Bayes
+- Logistic Regression
+- Neural Network
+
+TinyBERT consistently outperformed other models and was chosen for the final implementation in the Streamlit dashboard.
 
 ## Data Preprocessing
 
@@ -49,10 +60,11 @@ This project uses the `huawei-noah/TinyBERT_General_4L_312D` model for sentiment
 
 ## Training
 
-The model is trained using:
-- Data augmentation techniques
-- SMOTE for handling class imbalance
-- AdamW optimizer with CosineAnnealingWarmRestarts learning rate scheduler
+The models are trained using:
+
+- Data augmentation techniques (SynonymAug)
+- SMOTE and RandomUnderSampler for handling class imbalance
+- For TinyBERT: AdamW optimizer with CosineAnnealingWarmRestarts learning rate scheduler
 
 ## Evaluation
 
@@ -60,10 +72,12 @@ The model's performance is evaluated using:
 - Accuracy
 - Precision, Recall, and F1-score for each class
 - Confusion matrix
+- Cross-validation scores
 
 ## SHAP Analysis
 
-SHAP (SHapley Additive exPlanations) values are used to interpret the model's predictions, showing how each feature contributes to the output.
+- SHAP (SHapley Additive exPlanations) values are used to interpret the model's predictions, showing how each feature contributes to the output.
+- Attention visualization helps users understand which parts of the input text the model focuses on when making predictions.
 
 ## Contributing
 
