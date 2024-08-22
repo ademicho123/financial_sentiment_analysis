@@ -14,7 +14,7 @@ This project provides a comprehensive financial sentiment analysis tool using na
 ## Installation
 
 1. Clone the repository:
-git clone https://github.com/Birkbeck/msc-projects-2023-4-ademicho123.git
+git clone https://github.com/ademicho123/financial_sentiment_analysis.git
 cd financial-sentiment-analysis
 2. Install the required packages:
 pip install -r requirements.txt
