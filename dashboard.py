@@ -6,6 +6,7 @@ import PyPDF2
 import io
 import shap
 import matplotlib.pyplot as plt
+from xquik_export import combine_export_text
 
 # Set page configuration
 st.set_page_config(page_title="Financial Sentiment Analysis Dashboard", layout="wide")
@@ -52,12 +53,19 @@ def explain_shap_values(shap_values, class_names):
 input_text = ""
 
 # Input type selection
-input_type = st.radio("Select input type:", ("Upload PDF", "Paste Text"))
+input_type = st.radio("Select input type:", ("Upload PDF", "Paste Text", "Upload Xquik CSV"))
 
 if input_type == "Upload PDF":
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
     if uploaded_file is not None:
         input_text = read_pdf(uploaded_file)
+elif input_type == "Upload Xquik CSV":
+    uploaded_file = st.file_uploader("Choose a Xquik export CSV", type="csv")
+    if uploaded_file is not None:
+        export_frame = pd.read_csv(uploaded_file)
+        input_text = combine_export_text(export_frame)
+        if not input_text:
+            st.error("CSV needs a text, tweet, full_text, content, body, headline, title, or message column.")
 else:
     input_text = st.text_area("Enter financial news or report text:")
 
@@ -69,8 +77,7 @@ if st.button("Analyze Text"):
         try:
             # Analyze the input text
             result = analyze_text(input_text)
-            result = predict_sentiment(input_text)
-            
+
             # Display key metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Sentiment", result['sentiment'])
