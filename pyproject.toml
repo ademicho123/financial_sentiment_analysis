@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "financial-sentiment-analyzer"
+version = "0.1.0"
+description = "Financial sentiment analysis with TinyBERT and explainability tools."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Ademicho" }]
+dependencies = [
+    "emoji",
+    "matplotlib",
+    "nltk",
+    "numpy",
+    "pandas",
+    "pypdf2",
+    "seaborn",
+    "shap",
+    "torch",
+    "transformers",
+]
+
+[project.optional-dependencies]
+dashboard = ["plotly", "streamlit"]
+training = [
+    "accelerate",
+    "datasets",
+    "imbalanced-learn",
+    "nlpaug",
+    "scikit-learn",
+]
+dev = ["build", "pytest"]
+benchmark = ["datasets", "scikit-learn", "tqdm"]
+
+[project.urls]
+Repository = "https://github.com/ademicho123/financial_sentiment_analysis"
+
+[tool.setuptools]
+packages = ["fin_sentiment"]
+py-modules = [
+    "attention_visualization",
+    "financial_sentiment_analysis",
+    "sentiment_predictor",
+    "shap_analysis",
+    "xquik_export",
+]
+
+[tool.setuptools.package-data]
+fin_sentiment = ["model/*"]

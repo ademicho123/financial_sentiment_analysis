@@ -1,94 +1,136 @@
-import pandas as pd
+"""Inference utilities for financial sentiment analysis."""
+
+from __future__ import annotations
+
+import re
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import emoji
 import torch
-import shap
-from attention_visualization import visualize_attention
-from financial_sentiment_analysis import (
-    preprocess_text,
-    assign_sentiment_scores,
-    assign_directions,
-    MODEL_NAME,
-    AutoModelForSequenceClassification,
-    AutoTokenizer
+from nltk import download as nltk_download
+from nltk.corpus import stopwords
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from nltk.stem import WordNetLemmatizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+MODEL_NAME = Path(__file__).resolve().parent / "fin_sentiment" / "model"
+
+if not MODEL_NAME.is_dir():
+    raise RuntimeError(
+        "Trained model not found. Run: python training/train_tinybert.py"
+    )
+
+tokenizer = AutoTokenizer.from_pretrained(str(MODEL_NAME), local_files_only=True)
+model = AutoModelForSequenceClassification.from_pretrained(
+    str(MODEL_NAME), local_files_only=True
 )
+model.eval()
+_sentiment_analyzer: SentimentIntensityAnalyzer | None = None
+_lemmatizer = WordNetLemmatizer()
 
-# Load the pre-trained model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
 
-def model_predict(texts):
-    texts = [str(text) for text in texts]
-    inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+@lru_cache(maxsize=1)
+def _load_stopwords() -> set[str]:
+    try:
+        return set(stopwords.words("english"))
+    except LookupError:
+        nltk_download("stopwords", quiet=True)
+        return set(stopwords.words("english"))
+
+
+def _lemmatize(tokens: list[str]) -> list[str]:
+    try:
+        return [_lemmatizer.lemmatize(token) for token in tokens]
+    except LookupError:
+        nltk_download("wordnet", quiet=True)
+        return [_lemmatizer.lemmatize(token) for token in tokens]
+
+
+def preprocess_text(text: str) -> str:
+    """Normalize text for model inference without importing training code."""
+    text = emoji.replace_emoji(text.lower(), "")
+    text = re.sub(r"[:;=]-?[()DPp]", "", text)
+    text = re.sub(r"[^\w\s]|\d+", " ", text)
+    tokens = re.sub(r"\s+", " ", text).strip().split()
+    tokens = [token for token in tokens if token not in _load_stopwords()]
+    return " ".join(_lemmatize(tokens))
+
+
+def assign_sentiment_score(text: str) -> float:
+    """Return the VADER compound score for text."""
+    global _sentiment_analyzer
+    if _sentiment_analyzer is None:
+        try:
+            _sentiment_analyzer = SentimentIntensityAnalyzer()
+        except LookupError:
+            nltk_download("vader_lexicon", quiet=True)
+            _sentiment_analyzer = SentimentIntensityAnalyzer()
+    return float(_sentiment_analyzer.polarity_scores(text)["compound"])
+
+
+def score_to_direction(score: float) -> str:
+    if score < 0.0:
+        return "bearish"
+    if score < 0.4:
+        return "neutral"
+    return "bullish"
+
+
+def model_predict(texts: list[str]) -> Any:
+    """Return model logits for SHAP and internal inference."""
+    inputs = tokenizer(
+        [str(text) for text in texts],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    )
     with torch.no_grad():
         outputs = model(**inputs)
-    return outputs.logits.numpy()
+    return outputs.logits.detach().cpu().numpy()
 
-def predict_sentiment(input_text):
+
+def predict_sentiment(input_text: str, explain: bool = True) -> dict[str, Any]:
+    """Predict sentiment, optionally including SHAP and attention output."""
     preprocessed_text = preprocess_text(input_text)
-    
-    logits = model_predict([preprocessed_text])
-    predictions = torch.softmax(torch.tensor(logits), dim=1)
-    predicted_class = torch.argmax(predictions, dim=1).item()
-    
-    sentiment_map = {0: 'bullish', 1: 'neutral', 2: 'bearish'}
-    predicted_sentiment = sentiment_map[predicted_class]
-    
-    sentiment_score = assign_sentiment_scores(preprocessed_text)
-    
-    direction_df = pd.DataFrame({'sentiment': [sentiment_score]})
-    direction_df = assign_directions(direction_df)
-    direction = direction_df['direction'].iloc[0]
-    
-    explainer = shap.Explainer(model_predict, tokenizer)
-    shap_values = explainer([str(preprocessed_text)])
-    
-    return {
-        'sentiment': predicted_sentiment,
-        'score': sentiment_score,
-        'direction': direction,
-        'preprocessed_text': preprocessed_text,
-        'shap_values': shap_values
+    inputs = tokenizer(
+        input_text,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    )
+
+    with torch.no_grad():
+        outputs = model(**inputs, output_attentions=explain)
+
+    predicted_class = torch.argmax(torch.softmax(outputs.logits, dim=1), dim=1).item()
+    predicted_sentiment = model.config.id2label[predicted_class].lower()
+    sentiment_score = assign_sentiment_score(input_text)
+    result: dict[str, Any] = {
+        "sentiment": predicted_sentiment,
+        "score": sentiment_score,
+        "direction": score_to_direction(sentiment_score),
+        "preprocessed_text": preprocessed_text,
     }
 
-def analyze_text(input_text):
+    if explain:
+        import shap
+
+        from attention_visualization import visualize_attention
+
+        explainer = shap.Explainer(model_predict, tokenizer)
+        result["shap_values"] = explainer([str(input_text)])
+        tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
+        result["attention_plot"] = visualize_attention(tokens, outputs.attentions)
+
+    return result
+
+
+def analyze_text(input_text: str, explain: bool = True) -> dict[str, Any]:
+    """Validate and analyze a non-empty string."""
     if not isinstance(input_text, str) or not input_text.strip():
         raise ValueError("Input text must be a non-empty string.")
-    
-    return predict_sentiment(input_text)
-
-def predict_sentiment(input_text):
-    preprocessed_text = preprocess_text(input_text)
-    
-    inputs = tokenizer(preprocessed_text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-    with torch.no_grad():
-        outputs = model(**inputs, output_attentions=True)
-    
-    logits = outputs.logits
-    attention_weights = outputs.attentions
-    
-    predictions = torch.softmax(logits, dim=1)
-    predicted_class = torch.argmax(predictions, dim=1).item()
-    
-    sentiment_map = {0: 'bullish', 1: 'neutral', 2: 'bearish'}
-    predicted_sentiment = sentiment_map[predicted_class]
-    
-    sentiment_score = assign_sentiment_scores(preprocessed_text)
-    
-    direction_df = pd.DataFrame({'sentiment': [sentiment_score]})
-    direction_df = assign_directions(direction_df)
-    direction = direction_df['direction'].iloc[0]
-    
-    explainer = shap.Explainer(model_predict, tokenizer)
-    shap_values = explainer([str(preprocessed_text)])
-    
-    # Generate attention visualization
-    tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
-    attention_plot = visualize_attention(tokens, attention_weights)
-    
-    return {
-        'sentiment': predicted_sentiment,
-        'score': sentiment_score,
-        'direction': direction,
-        'preprocessed_text': preprocessed_text,
-        'shap_values': shap_values,
-        'attention_plot': attention_plot
-    }
+    return predict_sentiment(input_text, explain=explain)

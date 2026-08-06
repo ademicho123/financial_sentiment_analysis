@@ -1,0 +1,47 @@
+{
+  "base_model": "huawei-noah/TinyBERT_General_4L_312D",
+  "dataset": "ghbacct/financial-phrasebank-all-agree-classification",
+  "train_samples": 1811,
+  "test_samples": 453,
+  "epochs": 3,
+  "batch_size": 16,
+  "max_length": 128,
+  "learning_rate": 2e-05,
+  "seed": 42,
+  "device": "cpu",
+  "training_seconds": 1570.8897958000307,
+  "history": [
+    {
+      "loss": 0.5924856841564179,
+      "accuracy": 0.8719646799116998,
+      "macro_f1": 0.8256741066569413,
+      "weighted_f1": 0.8695417659315832,
+      "epoch": 1,
+      "train_loss": 0.857592783737601
+    },
+    {
+      "loss": 0.4218796928723653,
+      "accuracy": 0.9094922737306843,
+      "macro_f1": 0.8760279456454079,
+      "weighted_f1": 0.9078694555941382,
+      "epoch": 2,
+      "train_loss": 0.49383166347417917
+    },
+    {
+      "loss": 0.2819460655252139,
+      "accuracy": 0.9403973509933775,
+      "macro_f1": 0.9220282412786899,
+      "weighted_f1": 0.9407603333925252,
+      "epoch": 3,
+      "train_loss": 0.29330436355973544
+    }
+  ],
+  "final_metrics": {
+    "loss": 0.2819460655252139,
+    "accuracy": 0.9403973509933775,
+    "macro_f1": 0.9220282412786899,
+    "weighted_f1": 0.9407603333925252,
+    "epoch": 3,
+    "train_loss": 0.29330436355973544
+  }
+}
